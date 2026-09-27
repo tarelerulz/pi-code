@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "web": {
+      "command": "python3",
+      "args": ["/path/to/pi-code-tools-mcp.py"],
+      "env": {
+        "DDGS_PATH": ""
+      }
+    }
+  }
+}
