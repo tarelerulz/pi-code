@@ -82,6 +82,18 @@ def last_question(msgs):
     return ""
 
 
+# pi-code's own helpers only read; they never ask "run?" (load_tools did,
+# under the ask-unless-marked-safe default, 2026-10-04).
+INTERNAL_TOOLS = {"load_tools", "read_saved_result"}
+
+FAILURE_STARTS = ("tool error", "Not run (", "Unknown tool", "No tool by that name", '{"error"')
+
+
+def is_failure(content):
+    """A tool result that means the call did not work (any source's error style)."""
+    return content.lstrip().startswith(FAILURE_STARTS)
+
+
 def run_turn(msgs, model, tools, auto_yes):
     """One user turn: loop model <-> tools until a final text answer."""
     always = auto_yes
@@ -103,6 +115,14 @@ def run_turn(msgs, model, tools, auto_yes):
             # one catalog line each, not the manual: every word costs ~0.1 s to read
             lines = [catalog_line(t) for t in hinted]
             msgs[-1]["content"] += "\n\n(Likely tool, run with call_tool: " + "; ".join(lines) + ")"
+    # Repeated-failure guard (2026-10-04): a small model once went round for
+    # 15 minutes retrying broken flight searches. Within one turn: the same
+    # call twice is not run again; failures in a row get a nudge one short of
+    # the limit, and at config.MAX_FAILURES (or a 3rd identical call) the turn
+    # stops and says why.
+    seen = {}
+    failures = 0
+    stop = None
     for rnd in range(config.MAX_ROUNDS):
         t0 = time.time()
         hint = ""
@@ -158,8 +178,25 @@ def run_turn(msgs, model, tools, auto_yes):
             args = coerce_args(name, fix_args(name, args), tools)
             print(f"  {bold(name)}  {tool_summary(name, args)}  {dim(f'[{dt:.0f}s{speed}]')}")
 
+            if stop:
+                msgs.append({"role": "tool", "tool_call_id": tc.get("id", ""),
+                             "content": "Not run: stopped after repeated failures."})
+                continue
+            sig = name + json.dumps(args, sort_keys=True, default=str)
+            seen[sig] = seen.get(sig, 0) + 1
+            if seen[sig] > 1:
+                content = (f"Not run (repeated): you already called {name} with exactly these "
+                           "arguments in this turn; its result is above. Use it, or try "
+                           "something different.")
+                print(dim("    " + content))
+                failures += 1
+                if seen[sig] >= 3 or failures >= config.MAX_FAILURES:
+                    stop = f"the model repeated the same {name} call {seen[sig]} times"
+                msgs.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": content})
+                continue
+
             skip = False
-            if needs_confirm(name) and not always:
+            if name not in INTERNAL_TOOLS and needs_confirm(name) and not always:
                 try:
                     ans = input("    run? [Y/n/a(lways)] ").strip().lower()
                 except EOFError:
@@ -182,6 +219,13 @@ def run_turn(msgs, model, tools, auto_yes):
                 content = check_args(name, args, tools)
             else:
                 content = condense_result(name, sources.call(name, args))
+            if not skip:
+                failures = failures + 1 if is_failure(content) else 0
+                if failures >= config.MAX_FAILURES:
+                    stop = f"{failures} tool calls failed in a row"
+                elif failures == config.MAX_FAILURES - 1 and failures:
+                    content += (f"\n\n(That is {failures} failed tool calls in a row. If you cannot "
+                                "fix it, stop calling tools and tell the user what went wrong.)")
             shown = content.strip()
             if shown:
                 trimmed = shown[:400] + ("…" if len(shown) > 400 else "")
@@ -193,4 +237,7 @@ def run_turn(msgs, model, tools, auto_yes):
                               f"result #{len(_saved)})"))
             msgs.append({"role": "tool", "tool_call_id": tc.get("id", ""),
                          "content": content})
+        if stop:
+            print(bold(f"  [stopped: {stop}. Rephrase the question, or ask for a smaller step.]"))
+            return
     print("stopped: too many tool rounds — ask again to continue.")

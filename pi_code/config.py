@@ -14,6 +14,8 @@ DEFAULT_TIMEOUT = int(os.environ.get("PI_CODE_TIMEOUT", "900"))
 START_HINT = os.environ.get(
     "PI_CODE_START_HINT", "the router server for your llama.cpp setup")
 MAX_ROUNDS = int(os.environ.get("PI_CODE_MAX_ROUNDS", "10"))
+# Failed tool calls in a row (or the same call repeated) before a turn stops.
+MAX_FAILURES = max(1, int(os.environ.get("PI_CODE_MAX_FAILURES", "3")))
 MAX_TOKENS = int(os.environ.get("PI_CODE_MAX_TOKENS", "1024"))
 CONTEXT_CHARS = int(os.environ.get("PI_CODE_CONTEXT_CHARS", "12000"))
 TOOL_CHARS = int(os.environ.get("PI_CODE_TOOL_CHARS", "2500"))

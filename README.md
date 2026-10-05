@@ -196,6 +196,7 @@ All optional, all environment variables. Defaults shown:
 | `PI_CODE_AUDIO_MODEL` | `asr` | preset for audio attachments |
 | `PI_CODE_VIDEO_MODEL` | `lfm-vision-1.6b` | preset for video attachments |
 | `PI_CODE_MAX_ROUNDS` | `10` | max tool-call rounds per turn before giving up |
+| `PI_CODE_MAX_FAILURES` | `3` | failed tool calls in a row that stop a turn (a repeated identical call is not re-run, and a 3rd one stops the turn); one short of the limit the model is told to stop and explain |
 | `PI_CODE_TIMEOUT` | `900` | request timeout, in seconds — raise this on slow hardware, lower it to fail faster on a fast machine |
 | `PI_CODE_MAX_TOKENS` | `1024` | longest reply per model call; pi-code warns when a reply hits it (thinking models can use it all up before answering) |
 | `PI_CODE_CONTEXT_CHARS` | `12000` | chat history sent per request, in characters (tool list not counted). Over it, the oldest tool results are replaced by pointers first, then the oldest exchanges are dropped; tool calls and results stay paired. If the server still says it is too long, pi-code halves this once and retries |

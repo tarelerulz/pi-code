@@ -516,6 +516,36 @@ class EndToEnd(unittest.TestCase):
         ids = [tc["id"] for m in msgs for tc in m.get("tool_calls") or []]
         self.assertEqual(ids, [m["tool_call_id"] for m in tool_msgs])
 
+    def test_repeated_call_is_not_rerun_and_stops(self):
+        same = {"name": WEATHER, "arguments": {"location_name": "home"}}
+        out, msgs, requests, calls = self.converse("weather?", [same, same, same, same, "never"])
+        self.assertEqual(len(calls), 1)                    # ran once, repeats not re-run
+        self.assertEqual(len(requests), 3)                 # 3rd identical call ends the turn
+        tool_msgs = [m["content"] for m in msgs if m["role"] == "tool"]
+        self.assertTrue(tool_msgs[1].startswith("Not run (repeated)"))
+        self.assertIn("[stopped: the model repeated the same", out)
+
+    def test_failures_in_a_row_nudge_then_stop(self):
+        out, msgs, requests, calls = self.converse("weather?", [
+            {"name": WEATHER, "arguments": {"location": "a"}},
+            {"name": WEATHER, "arguments": {"where": "b"}},
+            {"name": WEATHER, "arguments": {"place": "c"}},
+            "never"])
+        self.assertEqual(calls, [])
+        self.assertEqual(len(requests), 3)
+        tool_msgs = [m["content"] for m in msgs if m["role"] == "tool"]
+        self.assertIn("2 failed tool calls in a row", tool_msgs[1])    # nudge one short
+        self.assertNotIn("in a row", tool_msgs[0])
+        self.assertIn("[stopped: 3 tool calls failed in a row", out)
+        self.assertEqual(len(tool_msgs), len([tc for m in msgs for tc in m.get("tool_calls") or []]))
+
+    def test_internal_helpers_never_ask(self):
+        out, msgs, requests, calls = self.converse("weather?", [
+            {"name": "load_tools", "arguments": {}},       # becomes load_tools via call_tool
+            "done"])
+        self.assertNotIn("run? [Y/n", out)
+        self.assertNotIn("User declined", json.dumps(msgs))
+
     def test_shell_asks_and_can_be_declined(self):
         out, msgs, requests, calls = self.converse("run uname -a", [
             {"name": "exec_shell_command", "arguments": {"command": "uname -a"}},

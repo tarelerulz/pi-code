@@ -38,6 +38,10 @@ Configuration (environment variables, all optional — defaults shown):
   PI_CODE_AUDIO_MODEL=asr             preset for audio attachments
   PI_CODE_VIDEO_MODEL=lfm-vision-1.6b preset for video attachments
   PI_CODE_MAX_ROUNDS=10               max tool-call rounds per turn
+  PI_CODE_MAX_FAILURES=3              failed tool calls in a row (or the
+                                       same call repeated 3x) that stop a
+                                       turn; one short of it the model is
+                                       told to give up and explain
   PI_CODE_TIMEOUT=900                 request timeout, seconds
   PI_CODE_MAX_TOKENS=1024             longest reply per model call
   PI_CODE_CONTEXT_CHARS=12000         chat history kept per request (chars,
