@@ -159,7 +159,15 @@ class Results(unittest.TestCase):
         self.assertIn("Now: temperature", short)
         self.assertIn("Alerts:", short)
         if "observation is" in raw:
-            self.assertIn("WARNING: current reading is", short)
+            self.assertIn("WARNING: the 'Now' reading is", short)
+
+    def test_stale_reading_warning_any_unit(self):
+        raw = fixture("weather-noaa.md")
+        for age in ("34.1 hours", "2 days"):
+            stale = raw.replace("# Current Weather Conditions\n",
+                                f"# Current Weather Conditions\n\nThis observation is {age} old\n", 1)
+            self.assertIn(f"WARNING: the 'Now' reading is {age} old",
+                          pc.condense_result(WEATHER, stale))
 
     def test_condense_open_meteo(self):
         short = pc.condense_result(WEATHER, fixture("weather-london.md"))

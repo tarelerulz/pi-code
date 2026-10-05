@@ -105,9 +105,12 @@ def condense(name, raw):
         now = [f"{f.lower()} {_field(cur, f)}" for f in
                ("Temperature", "Conditions", "Humidity", "Wind") if _field(cur, f)]
         lines.append("Now: " + ", ".join(now))
-        old = re.search(r"observation is ([\d.]+ hours) old", cur)
+        # "34.1 hours old", "2 days old"... (only hours were matched until 2026-10-04,
+        # so a 2-day-old reading lost its warning and was reported as current)
+        old = re.search(r"observation is (.+?) old", cur)
         if old:
-            lines.append(f"WARNING: current reading is {old.group(1)} old (station may be down)")
+            lines.append(f"WARNING: the 'Now' reading is {old.group(1)} old (station may be down)"
+                         " - not the current weather")
     fc = _section(raw, "Weather Forecast")
     for block in re.split(r"^## ", fc, flags=re.M)[1:]:
         period = block.split("\n", 1)[0].strip()
