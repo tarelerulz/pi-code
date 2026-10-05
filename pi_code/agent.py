@@ -1,4 +1,5 @@
 """The agent loop: one user turn = model <-> tools until a plain answer."""
+import datetime
 import json
 import os
 import time
@@ -61,12 +62,15 @@ def system_msg(tools):
     """System message for this tool list ([] = plain chat). In deferred mode
     it carries the one-line tool catalog, so it stays the same from request
     to request and the router can keep it cached."""
+    # Today's date goes last: questions like "next month" or "tomorrow" need
+    # it, and it changes only once a day (one re-read of the prompt per day).
+    today = f"\n\nToday is {datetime.date.today():%A, %B %d, %Y}."
     if not tools:
-        return {"role": "system", "content": plain_prompt()}
+        return {"role": "system", "content": plain_prompt() + today}
     content = system_prompt()
     if _tool_mode[0] == "deferred":
         content += "\n\n" + tool_catalog(tools)
-    return {"role": "system", "content": content}
+    return {"role": "system", "content": content + today}
 
 
 def last_question(msgs):
@@ -90,8 +94,14 @@ def run_turn(msgs, model, tools, auto_yes):
             print(dim(f"  (picker {name}: {', '.join(guess) or 'no tool'}, "
                       f"{time.time() - t0:.1f}s)"))
         if guess and isinstance(msgs[-1].get("content"), str):
-            # one catalog line, not the manual: every word costs ~0.1 s to read
-            lines = [catalog_line(t) for t in tools if t["function"]["name"] in guess]
+            # Tools from the same server (same "<server>_" prefix) come along:
+            # a picker that sees only names can't tell flights_search from
+            # flights_cheapest_weekend, the main model can (2026-10-04).
+            family = {g.split("_", 1)[0] + "_" for g in guess}
+            hinted = [t for t in tools if t["function"]["name"] in guess
+                      or t["function"]["name"].startswith(tuple(family))][:3]
+            # one catalog line each, not the manual: every word costs ~0.1 s to read
+            lines = [catalog_line(t) for t in hinted]
             msgs[-1]["content"] += "\n\n(Likely tool, run with call_tool: " + "; ".join(lines) + ")"
     for rnd in range(config.MAX_ROUNDS):
         t0 = time.time()

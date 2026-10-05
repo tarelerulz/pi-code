@@ -10,5 +10,7 @@
   "local_dictate_once": "listen to the microphone",
   "local_search_notes": "search my notes",
   "weather_get_weather_summary": "weather",
-  "web_search": "web search"
+  "web_search": "web search",
+  "flights_search": "find flights",
+  "flights_cheapest_weekend": "cheapest weekend flights"
 }

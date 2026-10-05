@@ -228,7 +228,8 @@ class Deferred(unittest.TestCase):
         self.assertEqual(before[:2], after[:2])
         self.assertIn("No tool by that name", pc.load_tools({"names": ["zzz"]}, TOOLS))
         self.assertIn("call_tool", pc.system_msg(TOOLS)["content"])
-        self.assertEqual(pc.system_msg([])["content"], pc.PLAIN_SYSTEM_PROMPT)
+        self.assertTrue(pc.system_msg([])["content"].startswith(pc.PLAIN_SYSTEM_PROMPT))
+        self.assertIn(f"Today is {__import__('datetime').date.today():%A}", pc.system_msg([])["content"])
 
     def test_all_mode_sends_every_tool(self):
         pc._tool_mode[0] = "all"
@@ -412,7 +413,7 @@ class Prompts(unittest.TestCase):
         out, _ = run_isolated("print(pc.system_prompt())", PI_CODE_PROMPTS_DIR=d,
                               PI_CODE_SYSTEM_PROMPT="From the setting.")
         self.assertEqual(out, "From the setting.")
-        out, _ = run_isolated("print(pc.system_msg([])['content'] == pc.PLAIN_SYSTEM_PROMPT)",
+        out, _ = run_isolated("print(pc.system_msg([])['content'].startswith(pc.PLAIN_SYSTEM_PROMPT))",
                               PI_CODE_PROMPTS_DIR=os.path.join(d, "missing"))
         self.assertEqual(out, "True")
 
