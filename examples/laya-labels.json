@@ -1,0 +1,14 @@
+{
+  "_comment": "Plain-word choices for pi-code's Laya picker (PI_CODE_TOOL_PICKER=laya). Laya scored 11/14 with these vs 8/14 with raw tool names (2026-10-04). Tools not listed use their name with spaces.",
+  "read_file": "read a file",
+  "file_glob_search": "find files by name",
+  "grep_search": "search text inside files",
+  "exec_shell_command": "run a shell command",
+  "write_file": "write a file",
+  "edit_file": "edit a file",
+  "get_info": "system info",
+  "local_dictate_once": "listen to the microphone",
+  "local_search_notes": "search my notes",
+  "weather_get_weather_summary": "weather",
+  "web_search": "web search"
+}

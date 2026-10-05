@@ -1,0 +1,397 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "read_file",
+   "description": "Read the contents of a file. Optionally specify a 1-based line range. If append_loc is true, each line is prefixed with its line number (e.g. \"1\u2192...\").",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "Path to the file"
+     },
+     "start_line": {
+      "type": "integer",
+      "description": "First line to read, 1-based (default: 1)"
+     },
+     "end_line": {
+      "type": "integer",
+      "description": "Last line to read, 1-based inclusive (default: end of file)"
+     },
+     "append_loc": {
+      "type": "boolean",
+      "description": "Prefix each line with its line number"
+     }
+    },
+    "required": [
+     "path"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "file_glob_search",
+   "description": "Recursively search for files matching a glob pattern under a directory. Automatically skips files ignored by .gitignore (when the directory is inside a git repo) and common junk directories (.git, node_modules, build, dist, etc.) otherwise. A pattern with no '/' (e.g. \"*.cpp\") matches the file's basename at any depth. A pattern containing '/' matches the full relative path; unless already anchored with \"**/\" or a leading '/', it is automatically prefixed with \"**/\". Use type=\"dir\" or \"all\" to also list directories; directory entries are suffixed with '/' in the output. Note: directory listings do not apply .gitignore filtering.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "Base directory to search in"
+     },
+     "include": {
+      "type": "string",
+      "description": "Glob pattern for files to include (e.g. \"*.cpp\" or \"src/**/*.cpp\"). Default: **"
+     },
+     "exclude": {
+      "type": "string",
+      "description": "Glob pattern for files to exclude"
+     },
+     "type": {
+      "type": "string",
+      "description": "Entry type to return: \"file\" (default), \"dir\" or \"all\""
+     },
+     "max_depth": {
+      "type": "integer",
+      "description": "Maximum depth to descend into subdirectories (default: 0 = unlimited; 1 = direct children only)"
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Maximum number of results to return, capped at 100 (default 100)"
+     }
+    },
+    "required": [
+     "path"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "grep_search",
+   "description": "Search for a pattern in files under a path. Returns matching lines with file paths (and, unless searching a single file, paths relative to the given directory). Automatically skips files ignored by .gitignore (when the directory is inside a git repo) and common junk directories (.git, node_modules, build, dist, etc.) otherwise. include/exclude: a pattern with no '/' matches the basename at any depth; a pattern containing '/' matches the full relative path (auto-anchored with \"**/\" unless already anchored).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "File or directory to search in"
+     },
+     "pattern": {
+      "type": "string",
+      "description": "Pattern to search for (regular expression unless literal is true)"
+     },
+     "include": {
+      "type": "string",
+      "description": "Glob pattern to filter files (default: **)"
+     },
+     "exclude": {
+      "type": "string",
+      "description": "Glob pattern to exclude files"
+     },
+     "return_line_numbers": {
+      "type": "boolean",
+      "description": "If true, include line numbers in results"
+     },
+     "literal": {
+      "type": "boolean",
+      "description": "Treat pattern as a literal string instead of a regular expression (default: false)"
+     },
+     "ignore_case": {
+      "type": "boolean",
+      "description": "Case-insensitive search (default: false)"
+     },
+     "context_lines": {
+      "type": "integer",
+      "description": "Number of lines of context to show before and after each match (default: 0)"
+     }
+    },
+    "required": [
+     "path",
+     "pattern"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "exec_shell_command",
+   "description": "Execute a shell command and return its output (stdout and stderr combined).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "command": {
+      "type": "string",
+      "description": "Shell command to execute"
+     },
+     "timeout": {
+      "type": "integer",
+      "description": "Timeout in seconds (default 10, max 60)"
+     },
+     "max_output_size": {
+      "type": "integer",
+      "description": "Maximum output size in bytes (default 16384)"
+     }
+    },
+    "required": [
+     "command"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "write_file",
+   "description": "Write content to a file, creating it (including parent directories) if it does not exist. May use with edit_file for more complex edits.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "Path of the file to write"
+     },
+     "content": {
+      "type": "string",
+      "description": "Content to write"
+     }
+    },
+    "required": [
+     "path",
+     "content"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "edit_file",
+   "description": "Edit a file using exact text replacement. Each edits[].old_text must be unique in the file and is matched against the original content, not incrementally. Merge nearby changes into one edit instead of overlapping edits. Use write_file to replace the whole file.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "Path to the file to edit"
+     },
+     "edits": {
+      "type": "array",
+      "description": "One or more exact text replacements to apply",
+      "items": {
+       "type": "object",
+       "properties": {
+        "old_text": {
+         "type": "string",
+         "description": "Exact text to find; must be unique in the file and must not overlap with other edits"
+        },
+        "new_text": {
+         "type": "string",
+         "description": "Text to replace old_text with"
+        }
+       },
+       "required": [
+        "old_text",
+        "new_text"
+       ]
+      }
+     }
+    },
+    "required": [
+     "path",
+     "edits"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "get_info",
+   "description": "Returns runtime info: the OS name/version and the current working directory",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "local_dictate_once",
+   "description": "Listen to one utterance on the Pi's USB headset and return the Moonshine transcription",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "local_search_notes",
+   "description": "Semantically search the user's saved memory notes -- prior project decisions, benchmark results, and history from past sessions on this Pi. Use this when a question needs the user's own recorded history rather than general knowledge. When answering from the results, quote the passage text directly rather than paraphrasing it -- these are precise technical notes and paraphrasing risks changing the meaning.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string",
+      "description": "Natural-language search query"
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Max results to return (default 5)"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "weather_get_weather_summary",
+   "description": "Get a combined weather overview for a location in a SINGLE call. Best for broad questions like \"What's the weather like in Seattle?\", \"Is it safe to hike today?\", or \"Give me a weather rundown\". Aggregates current conditions, forecast, and active alerts by default, and can also include air quality and lightning. Provide the location as coordinates (latitude+longitude), a saved location_name, or a free-text city_name. For a single specific data product (just the forecast, just alerts, etc.), call that specialized tool directly. Sections that are unavailable for a location (e.g. alerts in a country not yet covered) are noted rather than failing the whole summary.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "latitude": {
+      "type": "number",
+      "description": "Latitude of the location (-90 to 90). Not required if location_name or city_name is provided.",
+      "minimum": -90,
+      "maximum": 90
+     },
+     "longitude": {
+      "type": "number",
+      "description": "Longitude of the location (-180 to 180). Not required if location_name or city_name is provided.",
+      "minimum": -180,
+      "maximum": 180
+     },
+     "location_name": {
+      "type": "string",
+      "description": "Name of a saved location (e.g., \"home\", \"cabin\"). Use instead of coordinates to reference a saved location. List them with list_saved_locations."
+     },
+     "city_name": {
+      "type": "string",
+      "description": "Free-text place name to geocode (e.g., \"Paris, France\", \"Bend, Oregon\"). Use instead of coordinates when you only have a place name and it is not a saved location. Include state/country for disambiguation when possible."
+     },
+     "include": {
+      "type": "array",
+      "description": "Which sections to include (default: [\"current\", \"forecast\", \"alerts\"]). Add \"air_quality\" and/or \"lightning\" for a fuller picture.",
+      "items": {
+       "type": "string",
+       "enum": [
+        "current",
+        "forecast",
+        "alerts",
+        "air_quality",
+        "lightning"
+       ]
+      }
+     },
+     "days": {
+      "type": "number",
+      "description": "Number of forecast days to include when the forecast section is requested (1-16, default: 7)",
+      "minimum": 1,
+      "maximum": 16,
+      "default": 7
+     },
+     "detail": {
+      "type": "string",
+      "description": "Output verbosity: \"summary\" (shortest), \"standard\" (default, balanced), or \"full\" (everything the source provides, e.g. full alert descriptions, uncapped hourly forecast, embedded imagery).",
+      "enum": [
+       "summary",
+       "standard",
+       "full"
+      ]
+     },
+     "units": {
+      "type": "string",
+      "description": "Unit system for output: \"imperial\" (\u00b0F, mph, inHg) or \"metric\" (\u00b0C, km/h, hPa). Defaults to the server setting (imperial unless configured otherwise). Individual *_unit overrides below take precedence.",
+      "enum": [
+       "imperial",
+       "metric"
+      ]
+     },
+     "temperature_unit": {
+      "type": "string",
+      "description": "Override temperature unit: \"F\" or \"C\".",
+      "enum": [
+       "F",
+       "C"
+      ]
+     },
+     "wind_speed_unit": {
+      "type": "string",
+      "description": "Override wind speed unit: \"mph\", \"kmh\", \"ms\", or \"kn\" (knots).",
+      "enum": [
+       "mph",
+       "kmh",
+       "ms",
+       "kn"
+      ]
+     },
+     "precipitation_unit": {
+      "type": "string",
+      "description": "Override precipitation unit: \"inch\" or \"mm\".",
+      "enum": [
+       "inch",
+       "mm"
+      ]
+     },
+     "pressure_unit": {
+      "type": "string",
+      "description": "Override pressure unit: \"inHg\" or \"hPa\".",
+      "enum": [
+       "inHg",
+       "hPa"
+      ]
+     },
+     "distance_unit": {
+      "type": "string",
+      "description": "Override distance/visibility/elevation unit: \"mi\" or \"km\".",
+      "enum": [
+       "mi",
+       "km"
+      ]
+     },
+     "time_format": {
+      "type": "string",
+      "description": "Clock format for times: \"12h\" or \"24h\".",
+      "enum": [
+       "12h",
+       "24h"
+      ]
+     }
+    },
+    "required": []
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "web_search",
+   "description": "Search the web and return a few current results with URLs and snippets.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string",
+      "description": "web search query"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  }
+ }
+]
