@@ -24,6 +24,9 @@ Usage:
                                     (default: a name list plus a Laya hint;
                                     the model loads what it needs)
   pi-code --list-tools             list available tool names
+  pi-code --tune -m quick          measure this machine with that model and
+                                    save settings that keep a step near
+                                    --target seconds (default 60)
   pi-code -t local_search_notes,web_search "what did I decide about X?"
                                     only load these tools (fewer tools in the
                                     schema is more reliable on small models,
@@ -48,6 +51,10 @@ Configuration (environment variables, all optional — defaults shown):
                                        not counting the tool list); oldest
                                        tool results shrink first, then the
                                        oldest turns are dropped
+  PI_CODE_TUNED_DIR=~/.config/pi-code/tuned
+                                      per-model settings from --tune; they
+                                       replace the three defaults above and
+                                       below, but a variable you set wins
   PI_CODE_TOOL_CHARS=2500             longest tool result sent as-is; bigger
                                        ones are saved to ~/.cache/pi-code and
                                        the model gets the start, the end and
@@ -106,6 +113,7 @@ launcher):
   deferred.py  load_tools / call_tool      files.py     -f attachments
   sources/     where tools come from: router.py, mcp.py (MCP client), local.py
   agent.py     the model <-> tools loop    cli.py       options + chat prompt
+  tune.py      pi-code --tune: measure this machine, size the settings
 Tests: test_pi_code.py (tests/ in the repo)
 """
 
@@ -124,3 +132,4 @@ from .results import READ_SAVED_TOOL, _saved, read_saved, save_result, shorten_r
 from .schemas import (catalog_line, coerce_args, first_sentence, lean_tool,  # noqa: E402,F401
                       resolve_tool_names, tool_catalog, tool_manual)
 from .server import api, call_model, chat_stream, list_models  # noqa: E402,F401
+from . import tune  # noqa: E402,F401

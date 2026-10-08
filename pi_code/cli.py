@@ -11,7 +11,8 @@ from .deferred import _loaded, _tool_mode
 from .files import choose_model, user_content
 from .plugins import PICKERS
 from .server import api, list_models
-from .ui import bold
+from .ui import bold, dim
+from . import tune
 
 
 def main():
@@ -38,6 +39,11 @@ def main():
                     help="with a prompt: run it and exit instead of staying interactive")
     ap.add_argument("-T", "--no-tools", action="store_true",
                     help="start with tools off (plain chat, faster)")
+    ap.add_argument("--tune", action="store_true",
+                    help="measure this machine with the model (-m) and save settings "
+                         "that keep a step near --target seconds")
+    ap.add_argument("--target", type=float, default=tune.DEFAULT_TARGET, metavar="SECONDS",
+                    help=f"with --tune: seconds per ordinary step (default {tune.DEFAULT_TARGET})")
     ap.add_argument("-f", "--file", action="append", default=[], metavar="PATH",
                     help="attach an image, audio, video, or text file (repeatable)")
     a = ap.parse_args()
@@ -83,6 +89,13 @@ def main():
     config.TOOL_PICKER = a.picker or config.TOOL_PICKER
     # -t is the hand-picked list: send exactly those, no catalog
     _tool_mode[0] = "all" if (a.tools_only or config.TOOL_PICKER == "all") else "deferred"
+    if a.tune:
+        try:
+            tune.run(model, tools, a.target)
+        except (urllib.error.URLError, RuntimeError, KeyError) as exc:
+            print(f"tuning failed: {exc}")
+            sys.exit(1)
+        return
     msgs = [system_msg([] if a.no_tools else tools)]
 
     # "pi-code fast" means the fast model, not the message "fast"
@@ -97,6 +110,9 @@ def main():
 
     print(f"pi-code — model: {model}  server: {config.BASE_URL}  "
           f"tools: {'+'.join(used)}  (/help for commands)")
+    tuned = tune.apply(model)
+    if tuned:
+        print(dim(f"  tuned for this machine on {tuned['date']} (pi-code --tune -m {model} to redo)"))
 
     active_tools = [] if a.no_tools else tools
 
@@ -148,7 +164,8 @@ def main():
             parts = line.split()
             if len(parts) == 2:
                 model = parts[1]
-                print(f"model set to {model} (loads on next message)")
+                print(f"model set to {model} (loads on next message)"
+                      + (" — using its --tune settings" if tune.apply(model) else ""))
             else:
                 print(f"current model: {model}")
             continue

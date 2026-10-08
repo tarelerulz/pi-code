@@ -556,5 +556,103 @@ class EndToEnd(unittest.TestCase):
                          ["User declined to run this tool."])
 
 
+PI400 = {"read_tokens_per_s": 10.7, "write_tokens_per_s": 4.8, "chars_per_token": 4.27,
+         "test_prompt_tokens": 335, "next_step_reread_tokens": 16, "fixed_chars": 3037,
+         "model_memory_tokens": 4096, "load_s": 1.0}
+
+
+class Tune(unittest.TestCase):
+    """pi-code --tune: the arithmetic, the precedence of your own settings,
+    and a whole run against a fake llama.cpp server."""
+
+    def test_pi400_numbers(self):
+        # Measured live 2026-10-07 (LFM2.5-1.2B on the Pi 400).
+        settings, timing, notes = pc.tune.choose(PI400, 60)
+        self.assertEqual(settings, {"CONTEXT_CHARS": 8000, "TOOL_CHARS": 1400, "MAX_TOKENS": 1024})
+        self.assertAlmostEqual(timing["tool_result_read_s"], 30.6, delta=0.5)
+        self.assertTrue(any("tool list alone" in n for n in notes))       # 66 s fixed > 60 s target
+        self.assertFalse(any("re-read" in n for n in notes))              # cache works there
+
+    def test_fast_machine_hits_the_ceilings(self):
+        fast = dict(PI400, read_tokens_per_s=900, write_tokens_per_s=60, model_memory_tokens=None)
+        settings, _, notes = pc.tune.choose(fast, 30)
+        self.assertEqual(settings["TOOL_CHARS"], pc.tune.LIMITS["TOOL_CHARS"][1])
+        self.assertEqual(settings["CONTEXT_CHARS"], pc.tune.LIMITS["CONTEXT_CHARS"][1])
+        self.assertFalse(any("tool list alone" in n for n in notes))
+
+    def test_small_memory_caps_history(self):
+        tiny = dict(PI400, read_tokens_per_s=900, model_memory_tokens=2048)
+        settings, _, _ = pc.tune.choose(tiny, 60)
+        self.assertEqual(settings["MAX_TOKENS"], 512)
+        # history + instructions + reply must fit 2048 tokens
+        self.assertLess(settings["CONTEXT_CHARS"] / 4.27 + 3037 / 4.27 + 512, 2048)
+
+    def test_no_cache_reuse_is_reported(self):
+        _, _, notes = pc.tune.choose(dict(PI400, next_step_reread_tokens=300), 60)
+        self.assertTrue(any("-ub 64" in n for n in notes))
+
+    def test_own_settings_win_and_untuned_models_get_defaults(self):
+        d = tempfile.mkdtemp(dir=TMP)
+        with open(os.path.join(d, "quick.json"), "w") as f:
+            json.dump({"date": "x", "settings": {"CONTEXT_CHARS": 8000, "TOOL_CHARS": 1400, "MAX_TOKENS": 512}}, f)
+        out, err = run_isolated(
+            "r = []\n"
+            "pc.tune.apply('quick'); r.append([pc.config.CONTEXT_CHARS, pc.config.TOOL_CHARS, pc.config.MAX_TOKENS])\n"
+            "pc.tune.apply('other'); r.append([pc.config.CONTEXT_CHARS, pc.config.TOOL_CHARS, pc.config.MAX_TOKENS])\n"
+            "print(json.dumps(r))", PI_CODE_TUNED_DIR=d, PI_CODE_TOOL_CHARS="999")
+        self.assertEqual(json.loads(out), [[8000, 999, 512], [12000, 999, 1024]], err)
+
+    def test_tune_run_against_fake_server(self):
+        bodies = []
+
+        class Server(http.server.BaseHTTPRequestHandler):
+            def reply(self, obj):
+                data = json.dumps(obj).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_GET(self):
+                if self.path.startswith("/v1/models"):
+                    self.reply({"data": [{"id": "m", "status": {"value": "loaded", "args": ["-c", "4096"]}}]})
+                else:          # router /tools wraps each tool
+                    self.reply([{"definition": t} for t in TOOLS])
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                bodies.append(body)
+                n = len(bodies)
+                timings = {1: {"prompt_n": 5, "prompt_per_second": 50},
+                           2: {"prompt_n": 340, "prompt_per_second": 10.0},
+                           3: {"prompt_n": 12, "prompt_per_second": 10.0},
+                           4: {"prompt_n": 20, "prompt_per_second": 10.0, "predicted_per_second": 5.0}}[min(n, 4)]
+                self.reply({"choices": [{"message": {"content": "OK"}}], "timings": timings})
+
+            def log_message(self, *a):
+                pass
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), Server)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        d = tempfile.mkdtemp(dir=TMP)
+        try:
+            r = subprocess.run([sys.executable, os.path.join(BIN, "pi-code"), "--tune", "-m", "m", "--picker", "none"],
+                               env=dict(os.environ, PI_CODE_URL=f"http://127.0.0.1:{srv.server_address[1]}",
+                                        PI_CODE_TUNED_DIR=d), capture_output=True, text=True, timeout=60)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        with open(os.path.join(d, "m.json")) as f:
+            rec = json.load(f)
+        self.assertEqual(rec["measured"]["read_tokens_per_s"], 10.0)
+        self.assertEqual(rec["measured"]["write_tokens_per_s"], 5.0)
+        self.assertEqual(rec["measured"]["next_step_reread_tokens"], 12)
+        self.assertEqual(rec["measured"]["model_memory_tokens"], 4096)
+        self.assertEqual(len(bodies), 4)
+        self.assertIn("follow-up re-read 12 of 340", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

@@ -21,6 +21,9 @@ CONTEXT_CHARS = int(os.environ.get("PI_CODE_CONTEXT_CHARS", "12000"))
 TOOL_CHARS = int(os.environ.get("PI_CODE_TOOL_CHARS", "2500"))
 FULL_TOOL_DOCS = os.environ.get("PI_CODE_FULL_TOOL_DOCS", "") not in ("", "0")
 TOOL_PICKER = os.environ.get("PI_CODE_TOOL_PICKER", "laya")
+# Per-model settings measured by `pi-code --tune` (tune.py).
+TUNED_DIR = os.path.expanduser(os.environ.get(
+    "PI_CODE_TUNED_DIR", "~/.config/pi-code/tuned"))
 RESULTS_DIR = os.path.join(os.path.expanduser("~/.cache/pi-code/results"),
                            time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}")
 
