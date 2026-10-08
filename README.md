@@ -212,14 +212,21 @@ pi-code --tune -m quick              # target: ~60 s per ordinary step
 pi-code --tune -m quick --target 30
 ```
 
-It sends four short requests and reports, for this machine and model:
+It sends seven short requests and reports, for this machine and model:
 
-- reading and writing speed (from the llama.cpp server's own timings)
-- characters per token
+- reading speed (two short prompts and one ~1,300-token prompt; long prompts read slower per token on a
+  CPU) and writing speed, from the llama.cpp server's own timings
+- whether the model *thinks* before answering (hidden reasoning is the slowest part on a slow machine)
 - whether a follow-up step re-reads only the new part or the whole conversation (cache reuse)
-- how big the instructions + tool list are, and the model's memory (`-c`) if the router reports it
+- the exact size of pi-code's instructions + tool list in tokens (the server's `prompt_n + cache_n`)
+- the server's launch settings (threads, ubatch, context size, model file) when it is a llama.cpp router
+- when the server runs on this machine: cores, free memory, whether the system **swapped** during the
+  test, CPU temperature and clock (a hot or throttled CPU makes the numbers low)
 
-Then it picks `PI_CODE_TOOL_CHARS`, `PI_CODE_CONTEXT_CHARS` and `PI_CODE_MAX_TOKENS` and saves them to
+`pi-code --tune -m quick,chat,coder` tunes each model and ends with a table that ranks them by the time of
+a typical step (reading 300 new tokens + writing 150). It measures speed only; check the answers yourself.
+
+Then it picks `PI_CODE_TOOL_CHARS`, `PI_CODE_CONTEXT_CHARS`, `PI_CODE_MAX_TOKENS` and `PI_CODE_TIMEOUT` and saves them to
 `~/.config/pi-code/tuned/<model>.json` (`PI_CODE_TUNED_DIR`). They are used automatically whenever that
 model runs (pi-code says so at start and on `/model`); a `PI_CODE_*` variable you set yourself always wins.
 Re-run it after changing hardware, model, quantization or server settings.
@@ -231,25 +238,44 @@ How it sizes things (constants at the top of `pi_code/tune.py`):
 | `TOOL_CHARS` | a tool result is read right after it arrives: reading one full-size result takes half the target |
 | `CONTEXT_CHARS` | the whole history is read again only when the server can't use its cache (first step, after trimming): such a step may take 4 × the target; never more than fits the model's memory with room for the reply |
 | `MAX_TOKENS` | not cut for speed (a cut-off reply is a broken answer, not a faster one); only capped at a quarter of the model's memory. The time a full reply takes is reported instead |
+| `TIMEOUT` | 1.5 × the slowest step this machine can have (whole re-read + a full reply + model load), never below the default 900 s, so a slow reply is never thrown away half-way |
+
+It also prints plain advice for what settings can't fix: too many server threads for the cores, a server
+that re-reads every step (with the `-ub 64` fix), swapping or too little free memory, a thinking model
+(use reasoning off), a hot or busy CPU during the test, and how long a short and a full reply take.
 
 What it printed on the Pi 400 (LFM2.5-1.2B, 2026-10-07):
 
 ```
-  reading      10.7 tokens/s   (~4.27 characters per token)
-  writing       4.8 tokens/s
-  follow-up re-read 16 of 335 tokens
-  every request carries 3037 characters of instructions + tool list
-  model memory 4096 tokens
+  reading      10.8 tokens/s   (short prompts: 10.8, 10.9; 1265 tokens: 10.7)
+  writing       4.8 tokens/s   (thinks first: no)
+  follow-up re-read 16 of 335 tokens; ~4.27 characters per token
+  every request carries 754 tokens of instructions + tool list
+  server: memory_tokens 4096, threads 3, threads_batch 4, ubatch 64, model_mb 663
+  machine: 4 cores, 2851 MB free, swapped during test: 0.2 MB, 57 °C, 1800/1800 MHz
 
   setting          default  tuned
-  CONTEXT_CHARS      12000   8000
+  CONTEXT_CHARS      12000   7500
   TOOL_CHARS          2500   1400
   MAX_TOKENS          1024   1024
+  TIMEOUT              900    900
 
-  reading a full-size tool result: ~30.6 s; a step that re-reads everything: ~241.6 s
-  - The instructions and tool list alone take ~66 s to read when nothing is cached. ...
+  reading a full-size tool result: ~30.4 s; a step that re-reads everything: ~234.6 s; slowest possible step: ~448 s
+  - The instructions and tool list (754 tokens) take ~70 s to read when nothing is cached. ...
   - Writing runs at 4.8 tokens/s: a short answer (~150 tokens) takes ~31 s ...
 ```
+
+And `pi-code --tune -m quick,chat` (LFM2.5-1.2B against Qwen3.5-2B with reasoning on) ended with:
+
+```
+Compared on this machine (speed only; check each model's answers yourself):
+  model            typical step  reading  writing thinks  file MB  notes
+  quick                  59.0 s     10.8      4.8     no      663
+  chat                  102.5 s      7.5      2.4    yes     1158
+```
+
+with the note that chat spent its whole writing test thinking. On this machine that means the 1.2B model
+answers in about half the time, before counting the thinking.
 
 ### What made the biggest difference on the Pi
 
@@ -303,7 +329,7 @@ All optional, all environment variables. Defaults shown:
 | `PI_CODE_CONTEXT_CHARS` | `12000` | chat history sent per request, in characters (tool list not counted). Over it, the oldest tool results are replaced by pointers first, then the oldest exchanges are dropped; tool calls and results stay paired. If the server still says it is too long, pi-code halves this once and retries |
 | `PI_CODE_TOOL_CHARS` | `2500` | longest tool result sent to the model as-is. Bigger results are saved to `~/.cache/pi-code/results/<session>/<id>.txt`; the model gets the start, the end, and a local `read_saved_result` tool (by offset or `find` text) for the rest |
 | `PI_CODE_TOOL_PICKER` | `laya` | how tools reach the model. `none`: the system message lists each tool as one line `name(args)`, and the model gets two fixed tools, `load_tools` (a tool's manual as a tool result) and `call_tool` (run a tool by name). The tool list never changes, so the router keeps the prompt cached. Calls with wrong argument names are not run; the manual is returned instead. `laya` (needs `examples/pickers/laya.py` installed, a llama.cpp `llama-server` new enough for `/v1/systemone`, and the Laya GGUF; otherwise it quietly acts as `none`): like `none`, plus the Laya decision model (own server on `PI_CODE_LAYA_PORT`, default 8096, started and stopped by pi-code; `PI_CODE_LAYA_SERVER`, `PI_CODE_LAYA_MODEL`) adds a one-line "likely tool" hint to each question, choosing from plain-word labels in `PI_CODE_LAYA_LABELS` (default `~/.config/pi-code/laya-labels.json`; unlabeled tools use their name). `all`: every tool's schema up front (old behaviour). `-t NAMES` always sends exactly those tools. Also `--picker` |
-| `PI_CODE_TUNED_DIR` | `~/.config/pi-code/tuned` | per-model settings saved by `--tune` (`<model>.json`); they replace the defaults of `MAX_TOKENS`, `CONTEXT_CHARS` and `TOOL_CHARS` for that model, but a variable you set yourself wins |
+| `PI_CODE_TUNED_DIR` | `~/.config/pi-code/tuned` | per-model settings saved by `--tune` (`<model>.json`); they replace the defaults of `MAX_TOKENS`, `CONTEXT_CHARS`, `TOOL_CHARS` and `TIMEOUT` for that model, but a variable you set yourself wins |
 | `PI_CODE_FULL_TOOL_DOCS` | unset | `1` sends full tool descriptions; default trims each to its first sentence and reduces the weather tool to place + days |
 | `PI_CODE_START_HINT` | generic message | command/hint printed if the router can't be reached — set this to your actual startup script/command |
 

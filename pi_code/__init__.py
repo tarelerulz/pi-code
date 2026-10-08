@@ -25,6 +25,7 @@ Usage:
                                     the model loads what it needs)
   pi-code --list-tools             list available tool names
   pi-code --tune -m quick          measure this machine with that model and
+                                    (-m a,b,c: several, then compare speed)
                                     save settings that keep a step near
                                     --target seconds (default 60)
   pi-code -t local_search_notes,web_search "what did I decide about X?"
@@ -53,8 +54,9 @@ Configuration (environment variables, all optional — defaults shown):
                                        oldest turns are dropped
   PI_CODE_TUNED_DIR=~/.config/pi-code/tuned
                                       per-model settings from --tune; they
-                                       replace the three defaults above and
-                                       below, but a variable you set wins
+                                       replace the defaults of MAX_TOKENS,
+                                       CONTEXT_CHARS, TOOL_CHARS and TIMEOUT,
+                                       but a variable you set wins
   PI_CODE_TOOL_CHARS=2500             longest tool result sent as-is; bigger
                                        ones are saved to ~/.cache/pi-code and
                                        the model gets the start, the end and

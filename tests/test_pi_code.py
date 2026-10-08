@@ -556,55 +556,92 @@ class EndToEnd(unittest.TestCase):
                          ["User declined to run this tool."])
 
 
-PI400 = {"read_tokens_per_s": 10.7, "write_tokens_per_s": 4.8, "chars_per_token": 4.27,
-         "test_prompt_tokens": 335, "next_step_reread_tokens": 16, "fixed_chars": 3037,
-         "model_memory_tokens": 4096, "load_s": 1.0}
+PI400 = {"read_tokens_per_s": 10.7, "read_tokens_per_s_samples": [10.7, 10.6], "read_long_tokens_per_s": 10.2,
+         "long_prompt_tokens": 1300, "write_tokens_per_s": 4.8, "thinks": False, "thinking_share": 0,
+         "chars_per_token": 4.27, "test_prompt_tokens": 335, "next_step_reread_tokens": 16,
+         "fixed_tokens": 711, "fixed_chars": 3037, "model_memory_tokens": 4096, "load_s": 1.0,
+         "server_here": True,
+         "server": {"threads": 3, "threads_batch": 4, "ubatch": 64, "memory_tokens": 4096, "model_mb": 633},
+         "machine": {"cores": 4, "mem_available_mb": 2800, "swapped_pages_during_test": 0,
+                     "temp_c": 50, "cpu_mhz": 1800, "cpu_max_mhz": 1800}}
 
 
 class Tune(unittest.TestCase):
-    """pi-code --tune: the arithmetic, the precedence of your own settings,
-    and a whole run against a fake llama.cpp server."""
+    """pi-code --tune: the arithmetic, the advice, the precedence of your own
+    settings, and whole runs against a fake llama.cpp server."""
+
+    def notes(self, **changes):
+        m = json.loads(json.dumps(PI400))
+        for k, v in changes.items():
+            if isinstance(v, dict):
+                m[k].update(v)
+            else:
+                m[k] = v
+        return pc.tune.choose(m, 60)
 
     def test_pi400_numbers(self):
-        # Measured live 2026-10-07 (LFM2.5-1.2B on the Pi 400).
+        # Measured live 2026-10-07 (LFM2.5-1.2B on the Pi 400); history uses the slower long-prompt speed.
         settings, timing, notes = pc.tune.choose(PI400, 60)
-        self.assertEqual(settings, {"CONTEXT_CHARS": 8000, "TOOL_CHARS": 1400, "MAX_TOKENS": 1024})
+        self.assertEqual(settings, {"CONTEXT_CHARS": 7500, "TOOL_CHARS": 1400, "MAX_TOKENS": 1024, "TIMEOUT": 900})
         self.assertAlmostEqual(timing["tool_result_read_s"], 30.6, delta=0.5)
-        self.assertTrue(any("tool list alone" in n for n in notes))       # 66 s fixed > 60 s target
-        self.assertFalse(any("re-read" in n for n in notes))              # cache works there
+        self.assertTrue(any("tool list (711 tokens)" in n for n in notes))   # ~70 s > 60 s target
+        self.assertFalse(any("re-read" in n or "SWAPPED" in n or "thinks" in n or "hot" in n for n in notes))
+
+    def test_timeout_grows_on_a_slower_machine(self):
+        settings, timing, _ = self.notes(read_tokens_per_s=2.0, read_long_tokens_per_s=2.0,
+                                         read_tokens_per_s_samples=[2.0, 2.0], write_tokens_per_s=1.0)
+        self.assertGreater(settings["TIMEOUT"], 900)
+        self.assertGreaterEqual(settings["TIMEOUT"], 1.5 * timing["slowest_step_s"] - 60)
 
     def test_fast_machine_hits_the_ceilings(self):
-        fast = dict(PI400, read_tokens_per_s=900, write_tokens_per_s=60, model_memory_tokens=None)
-        settings, _, notes = pc.tune.choose(fast, 30)
+        settings, _, notes = self.notes(read_tokens_per_s=900, read_long_tokens_per_s=900,
+                                        read_tokens_per_s_samples=[900, 900], write_tokens_per_s=60,
+                                        model_memory_tokens=None)
         self.assertEqual(settings["TOOL_CHARS"], pc.tune.LIMITS["TOOL_CHARS"][1])
         self.assertEqual(settings["CONTEXT_CHARS"], pc.tune.LIMITS["CONTEXT_CHARS"][1])
-        self.assertFalse(any("tool list alone" in n for n in notes))
+        self.assertEqual(settings["TIMEOUT"], 900)                     # never below the default
+        self.assertFalse(any("tool list" in n for n in notes))
 
     def test_small_memory_caps_history(self):
-        tiny = dict(PI400, read_tokens_per_s=900, model_memory_tokens=2048)
-        settings, _, _ = pc.tune.choose(tiny, 60)
+        settings, _, _ = self.notes(read_tokens_per_s=900, read_long_tokens_per_s=900,
+                                    read_tokens_per_s_samples=[900, 900], model_memory_tokens=2048)
         self.assertEqual(settings["MAX_TOKENS"], 512)
-        # history + instructions + reply must fit 2048 tokens
-        self.assertLess(settings["CONTEXT_CHARS"] / 4.27 + 3037 / 4.27 + 512, 2048)
+        self.assertLess(settings["CONTEXT_CHARS"] / 4.27 + 711 + 512, 2048)
 
-    def test_no_cache_reuse_is_reported(self):
-        _, _, notes = pc.tune.choose(dict(PI400, next_step_reread_tokens=300), 60)
-        self.assertTrue(any("-ub 64" in n for n in notes))
+    def test_advice(self):
+        cases = {
+            "-ub 64": dict(next_step_reread_tokens=300, server={"ubatch": 512}),
+            "SWAPPED": dict(machine={"swapped_pages_during_test": 8000}),        # 31 MB
+            "Some swapping": dict(machine={"swapped_pages_during_test": 3000}),  # 12 MB
+            "memory left": dict(machine={"mem_available_mb": 250}),
+            "thinks before answering": dict(thinks=True, thinking_share=0.8),
+            "-tb (threads for reading) = 8": dict(server={"threads_batch": 8}),
+            "hot or slowed": dict(machine={"cpu_mhz": 1200}),
+            "differed": dict(read_tokens_per_s_samples=[10.7, 7.0]),
+            "Long prompts read slower": dict(read_long_tokens_per_s=6.0),
+        }
+        for needle, change in cases.items():
+            _, _, notes = self.notes(**change)
+            self.assertTrue(any(needle in n for n in notes), (needle, notes))
+
+    def test_normal_zram_swapping_is_not_a_warning(self):
+        for pages in (39, 890):             # seen live on the Pi 400 at full speed (2026-10-07)
+            _, _, notes = self.notes(machine={"swapped_pages_during_test": pages})
+            self.assertFalse(any("swap" in n.lower() for n in notes), (pages, notes))
 
     def test_own_settings_win_and_untuned_models_get_defaults(self):
         d = tempfile.mkdtemp(dir=TMP)
         with open(os.path.join(d, "quick.json"), "w") as f:
-            json.dump({"date": "x", "settings": {"CONTEXT_CHARS": 8000, "TOOL_CHARS": 1400, "MAX_TOKENS": 512}}, f)
+            json.dump({"date": "x", "settings": {"CONTEXT_CHARS": 8000, "TOOL_CHARS": 1400,
+                                                 "MAX_TOKENS": 512, "TIMEOUT": 1500}}, f)
         out, err = run_isolated(
-            "r = []\n"
-            "pc.tune.apply('quick'); r.append([pc.config.CONTEXT_CHARS, pc.config.TOOL_CHARS, pc.config.MAX_TOKENS])\n"
-            "pc.tune.apply('other'); r.append([pc.config.CONTEXT_CHARS, pc.config.TOOL_CHARS, pc.config.MAX_TOKENS])\n"
+            "c = pc.config; r = []\n"
+            "pc.tune.apply('quick'); r.append([c.CONTEXT_CHARS, c.TOOL_CHARS, c.MAX_TOKENS, c.DEFAULT_TIMEOUT])\n"
+            "pc.tune.apply('other'); r.append([c.CONTEXT_CHARS, c.TOOL_CHARS, c.MAX_TOKENS, c.DEFAULT_TIMEOUT])\n"
             "print(json.dumps(r))", PI_CODE_TUNED_DIR=d, PI_CODE_TOOL_CHARS="999")
-        self.assertEqual(json.loads(out), [[8000, 999, 512], [12000, 999, 1024]], err)
+        self.assertEqual(json.loads(out), [[8000, 999, 512, 1500], [12000, 999, 1024, 900]], err)
 
-    def test_tune_run_against_fake_server(self):
-        bodies = []
-
+    def fake_server(self, bodies, thinks=False):
         class Server(http.server.BaseHTTPRequestHandler):
             def reply(self, obj):
                 data = json.dumps(obj).encode()
@@ -616,42 +653,79 @@ class Tune(unittest.TestCase):
 
             def do_GET(self):
                 if self.path.startswith("/v1/models"):
-                    self.reply({"data": [{"id": "m", "status": {"value": "loaded", "args": ["-c", "4096"]}}]})
+                    self.reply({"data": [{"id": mid, "status": {"value": "loaded", "args": [
+                        "--ctx-size", "4096", "--threads", "3", "--ubatch-size", "64"]}} for mid in ("m", "n")]})
                 else:          # router /tools wraps each tool
                     self.reply([{"definition": t} for t in TOOLS])
 
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 bodies.append(body)
-                n = len(bodies)
-                timings = {1: {"prompt_n": 5, "prompt_per_second": 50},
-                           2: {"prompt_n": 340, "prompt_per_second": 10.0},
-                           3: {"prompt_n": 12, "prompt_per_second": 10.0},
-                           4: {"prompt_n": 20, "prompt_per_second": 10.0, "predicted_per_second": 5.0}}[min(n, 4)]
-                self.reply({"choices": [{"message": {"content": "OK"}}], "timings": timings})
+                text = body["messages"][-1]["content"]
+                slow = 2.0 if body["model"] == "n" else 1.0
+                msg = {"content": "OK"}
+                if "tools" in body:                                   # instructions + tool list
+                    t = {"prompt_n": 20, "cache_n": 700, "prompt_per_second": 10.0}
+                elif "eighty" in text:                                # writing test
+                    t = {"prompt_n": 20, "prompt_per_second": 10.0, "predicted_per_second": 5.0 / slow}
+                    if thinks:
+                        msg = {"content": "one, two", "reasoning_content": "Let me count. " * 10}
+                elif "one more word" in text:                         # follow-up
+                    t = {"prompt_n": 12, "prompt_per_second": 10.0}
+                elif len(text) > 3000:                                # long reading test
+                    t = {"prompt_n": 1300, "prompt_per_second": 9.0 / slow}
+                elif "Note" in text:                                  # short reading tests
+                    t = {"prompt_n": 340, "prompt_per_second": 10.0 / slow}
+                else:                                                 # load
+                    t = {"prompt_n": 5, "prompt_per_second": 50}
+                self.reply({"choices": [{"message": msg}], "timings": t})
 
             def log_message(self, *a):
                 pass
+        return Server
 
-        srv = http.server.HTTPServer(("127.0.0.1", 0), Server)
+    def tune_cli(self, models, thinks=False):
+        bodies = []
+        srv = http.server.HTTPServer(("127.0.0.1", 0), self.fake_server(bodies, thinks))
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         d = tempfile.mkdtemp(dir=TMP)
         try:
-            r = subprocess.run([sys.executable, os.path.join(BIN, "pi-code"), "--tune", "-m", "m", "--picker", "none"],
+            r = subprocess.run([sys.executable, os.path.join(BIN, "pi-code"), "--tune", "-m", models,
+                                "--picker", "none"],
                                env=dict(os.environ, PI_CODE_URL=f"http://127.0.0.1:{srv.server_address[1]}",
                                         PI_CODE_TUNED_DIR=d), capture_output=True, text=True, timeout=60)
         finally:
             srv.shutdown()
             srv.server_close()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return r, bodies, d
+
+    def test_tune_run_against_fake_server(self):
+        r, bodies, d = self.tune_cli("m")
         with open(os.path.join(d, "m.json")) as f:
-            rec = json.load(f)
-        self.assertEqual(rec["measured"]["read_tokens_per_s"], 10.0)
-        self.assertEqual(rec["measured"]["write_tokens_per_s"], 5.0)
-        self.assertEqual(rec["measured"]["next_step_reread_tokens"], 12)
-        self.assertEqual(rec["measured"]["model_memory_tokens"], 4096)
-        self.assertEqual(len(bodies), 4)
+            m = json.load(f)["measured"]
+        self.assertEqual(m["read_tokens_per_s"], 10.0)
+        self.assertEqual(m["read_long_tokens_per_s"], 9.0)
+        self.assertEqual(m["write_tokens_per_s"], 5.0)
+        self.assertEqual(m["next_step_reread_tokens"], 12)
+        self.assertEqual(m["server"]["memory_tokens"], 4096)
+        self.assertEqual(m["server"]["threads"], 3)
+        self.assertGreater(m["fixed_tokens"], 650)                    # 20 read + 700 cached, minus the probe
+        self.assertFalse(m["thinks"])
+        self.assertEqual(len(bodies), 7)
         self.assertIn("follow-up re-read 12 of 340", r.stdout)
+
+    def test_thinking_model_is_spotted(self):
+        r, _, d = self.tune_cli("m", thinks=True)
+        with open(os.path.join(d, "m.json")) as f:
+            self.assertTrue(json.load(f)["measured"]["thinks"])
+        self.assertIn("thinks before answering", r.stdout)
+
+    def test_compare_two_models(self):
+        r, bodies, d = self.tune_cli("m,n")
+        self.assertTrue(os.path.exists(os.path.join(d, "m.json")) and os.path.exists(os.path.join(d, "n.json")))
+        table = r.stdout.split("Compared on this machine", 1)[1]
+        self.assertLess(table.index("\n  m "), table.index("\n  n "))   # m is faster, listed first
 
 
 if __name__ == "__main__":

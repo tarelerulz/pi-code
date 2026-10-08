@@ -40,8 +40,8 @@ def main():
     ap.add_argument("-T", "--no-tools", action="store_true",
                     help="start with tools off (plain chat, faster)")
     ap.add_argument("--tune", action="store_true",
-                    help="measure this machine with the model (-m) and save settings "
-                         "that keep a step near --target seconds")
+                    help="measure this machine with the model (-m; a,b,c compares several) "
+                         "and save settings that keep a step near --target seconds")
     ap.add_argument("--target", type=float, default=tune.DEFAULT_TARGET, metavar="SECONDS",
                     help=f"with --tune: seconds per ordinary step (default {tune.DEFAULT_TARGET})")
     ap.add_argument("-f", "--file", action="append", default=[], metavar="PATH",
@@ -91,7 +91,7 @@ def main():
     _tool_mode[0] = "all" if (a.tools_only or config.TOOL_PICKER == "all") else "deferred"
     if a.tune:
         try:
-            tune.run(model, tools, a.target)
+            tune.run([m.strip() for m in model.split(",") if m.strip()], tools, a.target)
         except (urllib.error.URLError, RuntimeError, KeyError) as exc:
             print(f"tuning failed: {exc}")
             sys.exit(1)
